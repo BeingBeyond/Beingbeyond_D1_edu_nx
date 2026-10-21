@@ -1,0 +1,10 @@
+# Preserve release bytes (including line endings) so SHA256SUMS survives clones.
+# No global content filters or LFS setup is required for these release assets.
+* -text -filter
+*.whl binary -filter
+*.ko binary -filter
+*.tar.gz binary -filter
+*.STL binary -filter
+*.stl binary -filter
+*.png binary -filter
+*.npz binary -filter
