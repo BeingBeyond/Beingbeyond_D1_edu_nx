@@ -6,17 +6,19 @@
 
 ## 1. 支持矩阵
 
-| Python 小版本 | 实测解释器 | SDK wheel 标签 | 对应依赖清单 | 真机验收 |
+| Python 小版本 | 实测解释器 | SDK wheel 标签 | 对应依赖清单 | 示例 1～3 真机/GUI |
 | --- | --- | --- | --- | --- |
-| 3.8 | 3.8.20 | cp38-cp38-linux_aarch64 | requirements-jetson-py38.lock.txt | 未重跑 |
-| 3.9 | 3.9.25 | cp39-cp39-linux_aarch64 | requirements-jetson-py39.lock.txt | 未重跑 |
-| 3.10（默认） | 3.10.12 | cp310-cp310-linux_aarch64 | requirements-jetson-py310.lock.txt | 示例 1～3 通过 |
-| 3.11 | 3.11.17 | cp311-cp311-linux_aarch64 | requirements-jetson-py311.lock.txt | 未重跑 |
+| 3.8 | 3.8.20 | cp38-cp38-linux_aarch64 | requirements-jetson-py38.lock.txt | 未实测 |
+| 3.9 | 3.9.25 | cp39-cp39-linux_aarch64 | requirements-jetson-py39.lock.txt | 未实测 |
+| 3.10（默认） | 3.10.12 | cp310-cp310-linux_aarch64 | requirements-jetson-py310.lock.txt | 通过 |
+| 3.11 | 3.11.17 | cp311-cp311-linux_aarch64 | requirements-jetson-py311.lock.txt | 未实测 |
 
-四份 SDK wheel 都在 `lib/`，文件名前缀均为 `beingbeyond_d1_edu_sdk-0.2.0-`。
+四份 SDK wheel 都在 `lib/`，文件名前缀均为 `beingbeyond_d1_edu_sdk-0.2.0-`，均已通过软件验证。
 新增三个版本分别完成 pip check、四个核心的安装/ELF/ABI 审计、URDF/mesh、FK/QP、
 SDK 单步 IK、示例 4 参数帮助和 10 项无硬件回归。
-软件通过不等于已完成这些版本的实际串口/CAN 动作、GUI 或相机采集验收。
+Python 3.10 已完成示例 1～3 的实际串口/CAN 动作及触觉、相机窗口验证。
+各 Python 版本使用独立 ABI 和依赖组合，3.10 的结果不能代替其他版本的真机/GUI 实测。
+示例 0、4～10 和其他选配功能尚未测试，不属于本次已验收范围。
 
 截至 2026-10-20，Python 3.8、3.9、3.10 已结束 CPython 上游维护，3.11 仍处于安全维护阶段；
 Linux 发行商对系统 Python 的维护另计，不能将上游生命周期等同于 Ubuntu 系统包停止维护。
