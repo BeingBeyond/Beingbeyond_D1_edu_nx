@@ -31,15 +31,15 @@ if TYPE_CHECKING:
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--arm-dev", default="/dev/ttyACM0", help="Head/arm serial device")
+    parser.add_argument("--arm-dev", default="auto", help="Head/arm serial device or auto")
     parser.add_argument("--arm-baud", type=int, default=1000000)
     parser.add_argument("--hand-type", choices=("left", "right"), default="right")
-    parser.add_argument("--hand-can", default="can0", help="SocketCAN interface")
+    parser.add_argument("--hand-can", default="auto", help="PCAN SocketCAN interface or auto")
     parser.add_argument("--hand-baud", type=int, default=1000000)
     parser.add_argument(
         "--camera",
-        default="/dev/v4l/by-id/usb-SunplusIT_Inc_SPCA2100_PC_Camera-video-index0",
-        help="USB V4L2 camera device",
+        default="auto",
+        help="USB V4L2 camera device or auto",
     )
     parser.add_argument("--urdf", help="Override the SDK's default URDF")
     parser.add_argument("--headless", action="store_true", help="Capture RGB without GUI windows")

@@ -6,12 +6,13 @@ import traceback
 
 from beingbeyond_d1_edu_sdk import HeadArmRobot
 from beingbeyond_d1_edu_sdk.hand import DexHand
+from device_detection import resolve_devices, device_operation
 
 
 class D1Robot:
     def __init__(self, urdf_path: str, arm_dev: str, arm_baud: int,
                  hand_type: str, hand_can: str, hand_baud: int,
-                 vision_device: str = "/dev/v4l/by-id/usb-SunplusIT_Inc_SPCA2100_PC_Camera-video-index0",
+                 vision_device: str = "auto",
                  enable_vision: bool = True):
         self.head_arm = None
         self.hand = None
@@ -21,21 +22,28 @@ class D1Robot:
         self._vision_error = None
         self._closed = False
 
+        devices = resolve_devices(head_arm=arm_dev, can_iface=hand_can,
+                                  camera=vision_device if enable_vision else None,
+                                  head_arm_baud=arm_baud, hand_type=hand_type,
+                                  hand_baud=hand_baud, check_ready=True)
+        self.devices = devices
         try:
             if enable_vision:
                 from vision import StereoRGBCamera
 
-                self.vision = StereoRGBCamera(device=vision_device)
-            self.head_arm = HeadArmRobot(
-                urdf_path=urdf_path,
-                dev=arm_dev,
-                baudrate=arm_baud,
-            )
-            self.hand = DexHand(
-                hand_type=hand_type,
-                can_iface=hand_can,
-                baudrate=hand_baud,
-            )
+                self.vision = StereoRGBCamera(device=devices["camera"])
+            with device_operation("head_arm", devices["head_arm"], "controller initialization"):
+                self.head_arm = HeadArmRobot(
+                    urdf_path=urdf_path,
+                    dev=devices["head_arm"],
+                    baudrate=arm_baud,
+                )
+            with device_operation("hand CAN", devices["can_iface"], "controller initialization"):
+                self.hand = DexHand(
+                    hand_type=hand_type,
+                    can_iface=devices["can_iface"],
+                    baudrate=hand_baud,
+                )
         except BaseException:
             self.close(home=False, open_hand=False)
             raise
@@ -116,12 +124,13 @@ class D1Robot:
         self._vision_thread.start()
         if not ready.wait(startup_timeout):
             self.stop_vision_thread()
-            raise RuntimeError("Timed out waiting for the first camera frame.")
+            raise RuntimeError("stereo camera port={}: Timed out waiting for the first camera frame.".format(self.vision.device))
         self._raise_vision_error()
 
     def _raise_vision_error(self):
         if self._vision_error is not None:
-            raise RuntimeError("D1 camera capture failed.") from self._vision_error
+            raise RuntimeError("stereo camera port={}: D1 camera capture failed: {}".format(
+                self.vision.device, self._vision_error)) from self._vision_error
 
     def stop_vision_thread(self, join_timeout: float = 2.0):
         """
@@ -140,12 +149,16 @@ class D1Robot:
         )
 
     def set_q(self, q):
-        self.head_arm.set_positions(q[:8])
-        self.hand.set_joint_pos(q[8:])
+        with device_operation("head_arm", self.devices["head_arm"], "set positions"):
+            self.head_arm.set_positions(q[:8])
+        with device_operation("hand CAN", self.devices["can_iface"], "set positions"):
+            self.hand.set_joint_pos(q[8:])
 
     def get_q(self):
-        q_arm = self.head_arm.get_positions()
-        q_hand = self.hand.read_joint_pos()
+        with device_operation("head_arm", self.devices["head_arm"], "read positions"):
+            q_arm = self.head_arm.get_positions()
+        with device_operation("hand CAN", self.devices["can_iface"], "read positions"):
+            q_hand = self.hand.read_joint_pos()
         return q_arm + q_hand
 
     def close(self, *, home: bool = True, open_hand: bool = True):

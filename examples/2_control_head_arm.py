@@ -19,6 +19,7 @@ import time
 from beingbeyond_d1_edu_sdk import HeadArmRobot
 
 from utils import deg_list_to_rad, rad_list_to_deg
+from device_detection import resolve_head_arm, device_operation
 
 
 def main():
@@ -27,9 +28,10 @@ def main():
 
     from beingbeyond_d1_edu_sdk.urdf_path import get_default_urdf_path
     urdf = get_default_urdf_path()
-    dev = "/dev/ttyACM0"
+    dev = resolve_head_arm("auto")
 
-    robot = HeadArmRobot(urdf_path=urdf, dev=dev, return_delay=0)
+    with device_operation("head_arm", dev, "controller initialization"):
+        robot = HeadArmRobot(urdf_path=urdf, dev=dev, return_delay=0)
     try:
         joint_names = robot.joint_names
         n_joints = len(joint_names)

@@ -18,6 +18,7 @@ from exo_glove_teleop_common import (
     glove_norm_to_real_hand,
     transform_arm_exo_to_arm_deg,
     validate_common_cfg,
+    resolve_teleop_devices,
 )
 from utils import deg_list_to_rad
 
@@ -137,24 +138,24 @@ def build_combined_view(camera, hand, fps):
 
 @dataclass
 class TeleopRealCfg:
-    arm_exo_port: str = "/dev/ttyUSB0"
+    arm_exo_port: str = "auto"
     arm_exo_baudrate: int = 115200
     arm_exo_servo_ids: List[int] = field(default_factory=lambda: [1, 2, 3, 4, 5, 6])
     arm_exo_read_hz: float = 10.0
     arm_exo_command_delay_s: float = 0.008
     release_arm_exo_torque_on_start: bool = True
 
-    glove_port: str = "/dev/ttyACM1"
+    glove_port: str = "auto"
     glove_baudrate: int = 115200
     glove_timeout_s: float = 0.01
     glove_auto_calib: bool = True
 
-    robot_arm_dev: str = "/dev/ttyACM0"
+    robot_arm_dev: str = "auto"
     robot_arm_baud: int = 1_000_000
     robot_hand_type: str = "right"
-    robot_hand_can: str = "can0"
+    robot_hand_can: str = "auto"
     robot_hand_baud: int = 1_000_000
-    robot_vision_device: str = "/dev/v4l/by-id/usb-SunplusIT_Inc_SPCA2100_PC_Camera-video-index0"
+    robot_vision_device: str = "auto"
 
     arm_min_valid: int = 4
 
@@ -204,10 +205,10 @@ class TeleopReal:
         self.teleop[2:8] = np.deg2rad(np.asarray(cfg.arm_init_deg, dtype=np.float64))
         self.teleop[8:14] = np.asarray(cfg.hand_init_norm, dtype=np.float64)
 
-    def close(self) -> None:
+    def close(self, *, home: bool = True) -> None:
         try:
             if self.robot is not None:
-                self.robot.close()
+                self.robot.close(home=home, open_hand=home)
         except Exception:
             pass
         try:
@@ -240,6 +241,7 @@ class TeleopReal:
             hand_can=self.cfg.robot_hand_can,
             hand_baud=self.cfg.robot_hand_baud,
             vision_device=self.cfg.robot_vision_device,
+            enable_vision=self.cfg.enable_camera,
         )
         self.robot.__enter__()
         self.robot.hand.set_speed(speed=list(self.cfg.hand_speed))
@@ -305,9 +307,14 @@ class TeleopReal:
         print("\033[91m         Press it immediately if the robot motion looks unsafe.\033[0m\n")
 
         validate_cfg(self.cfg)
-        self._open_inputs()
-        self._open_robot()
-        self._move_to_initial_pose()
+        self.cfg = resolve_teleop_devices(self.cfg)
+        try:
+            self._open_inputs()
+            self._open_robot()
+            self._move_to_initial_pose()
+        except BaseException:
+            self.close(home=False)
+            raise
 
         print("[Info] Arm exo ids:", format_servo_ids(self.cfg.arm_exo_servo_ids))
         if self.cfg.enable_camera and self.cfg.enable_visualization:
@@ -326,6 +333,7 @@ class TeleopReal:
             else None
         )
 
+        failed = False
         try:
             if camera is not None:
                 camera.start()
@@ -376,10 +384,13 @@ class TeleopReal:
                     time.sleep(sleep_s)
 
         except KeyboardInterrupt:
+            failed = True
             print("\nInterrupted by user (Ctrl+C).")
         except Exception as exc:
+            failed = True
             print(f"Error: {exc}")
             traceback.print_exc()
+            raise
         finally:
             try:
                 if camera is not None:
@@ -387,7 +398,7 @@ class TeleopReal:
                 cv2.destroyWindow("D1 teleop camera + tactile")
             except Exception:
                 pass
-            self.close()
+            self.close(home=not failed)
 
 
 def main() -> None:
