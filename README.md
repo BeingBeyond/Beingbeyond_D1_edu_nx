@@ -19,6 +19,7 @@ Python 3.10 的示例 **1（灵巧手及触觉窗口）、2（头臂舵机）、
 - [Python 版本选择与安装](docs/PYTHON_VERSIONS.md)
 - [设备与端口核对](#4-设备权限与-can)
 - [报错与对应设备排查](#6-报错与对应设备排查)
+- [双语报错与接线排查 / Bilingual troubleshooting](docs/TROUBLESHOOTING.md)
 - [PCAN-USB 驱动与重启恢复](lib/pcan/README.md)
 - [发布说明及已知限制](docs/RELEASE_NOTES.md)
 - [第三方组件与许可证](THIRD_PARTY_NOTICES.md)
@@ -216,7 +217,8 @@ cd /home/nvidia/Beingbeyond_D1_edu_nx
 
 CAN 默认检查右手；检查左手时加 `--hand-type left`。
 不加 `--check` 时，串口仍执行协议读取，CAN 和相机仅按硬件信息识别。
-开发用模拟回归测试由维护环境执行，不包含在本发行目录中。
+完整开发用模拟回归测试由维护环境执行；本仓库 `tests/test_bilingual_diagnostics.py` 提供双语诊断回归测试。
+在已安装示例依赖的环境中运行 `python -m unittest discover -s tests`，不访问真实硬件。
 客户可使用第 3 节工具验证安装，使用本节工具验证已连接的设备。
 
 ## 5. 依次运行示例 1～3
@@ -244,7 +246,12 @@ cd /home/nvidia/Beingbeyond_D1_edu_nx/examples
 预检查报错会携带角色、候选端口及失败原因；运行包装层会补充所选端口与阶段，例如
 `[device] hand CAN port=can1 stage=status check: ...`。
 CAN 与相机的识别/通信错误会一起汇总；若其中任一失败，串口探测会跳过并明确列出未检查的角色。
-底层 SDK 个别直接调用仍可能只提供原始异常，应保留完整异常链；启动检查通过也不能保证运行期间设备不会断开。
+示例维护的报错和异常警告提供中英文说明，并补充相机线、遥操臂线和报错舵机 ID 的检查建议，
+详见 [双语排查说明](docs/TROUBLESHOOTING.md)。SDK/第三方库直接输出的日志仍可能为英文，应保留完整异常链；
+启动检查通过也不能保证运行期间设备不会断开。
+
+Example failures include Chinese/English explanations and device-specific connection checks.
+Keep the original traceback; logs printed directly by binary SDKs/third-party libraries may remain English.
 
 | 报错或现象（文字可能因底层库而异） | 对应设备 | 优先检查 |
 | --- | --- | --- |
