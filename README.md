@@ -8,7 +8,7 @@ SDK 版本 **0.2.0**，提供 CPython **3.8 / 3.9 / 3.10 / 3.11** wheel。
 
 已验证设备：Jetson Orin NX 8GB、Ubuntu 22.04.5、L4T R36.4.3、内核 `5.15.148-tegra`。
 CPython 3.8 / 3.9 / 3.10 / 3.11 均已通过软件验证。
-Python 3.10 的示例 **1（灵巧手及触觉窗口）、2（头臂舵机）、3（双目相机窗口）**
+Python 3.10 的示例 **1（灵巧手及触觉窗口）、2（头臂关节）、3（双目相机窗口）**
 已通过真机/GUI 验证；3.8 / 3.9 / 3.11 的真机/GUI 尚未实测。
 以上真机记录针对原固定端口版本。本次自动识别与预检查改动仅完成无硬件回归，尚需在 NX 真机复验。
 跨 Python 版本的真机/GUI 验证结果不能由 3.10 的结果直接推定。
@@ -111,13 +111,13 @@ Python 运行后出现的 `__pycache__` 是本地缓存，不应提交；重新�
 
 **示例 1～10 的硬件配置默认使用 `auto`，与普通版共用相同的识别逻辑。**
 启动时根据 USB 身份筛选候选设备，再按角色验证串口协议；不依赖串口编号、插入顺序或特定设备的 USB 序列号。
-识别成功会输出实际映射，例如 `[auto] head_arm -> /dev/ttyACM2`。
+正常识别不逐条打印候选端口；失败时只显示相关设备和检查步骤。
 
 | 设备角色 | 自动识别依据 |
 | --- | --- |
-| 头臂 | USB `1a86:55d3`；1 Mbps 下验证 8 个舵机 ID 的回复及校验和 |
+| 头臂 | USB `1a86:55d3`；1 Mbps 下验证 8 个关节 ID 的回复及校验和 |
 | 手套 | USB `1a86:55d3`；115200 baud 下连续收到 3 帧有效六通道 `ANGLES:` 数据 |
-| 外骨骼 | USB `1a86:7523`；115200 baud 下验证配置的舵机 ID 和位置应答范围 |
+| 外骨骼 | USB `1a86:7523`；115200 baud 下验证配置的关节 ID 和位置应答范围 |
 | 手部 CAN | USB `0c72:000c` 对应的 SocketCAN 接口，排除原生 NVIDIA CAN |
 | 双目相机 | USB `15aa:1955`、video index 0；优先返回对应的 by-id 路径 |
 
@@ -128,7 +128,7 @@ Python 运行后出现的 `__pycache__` 是本地缓存，不应提交；重新�
 
 使用 CAN 的运动示例会先验证接口状态、波特率和所选左/右手的实际应答；
 使用 `D1Robot` 的示例及示例 8/10 还会在控制器初始化前检查相机取帧。
-预检查只监听、读取串口寄存器/位置、请求 CAN 状态或采集图像，不使能舵机、不移动关节，也不配置 CAN。
+预检查只监听、读取串口寄存器/位置、请求 CAN 状态或采集图像，不使能关节、不移动关节，也不配置 CAN。
 打开串口仍可能使部分控制板复位。
 
 机器人正常供电后，分别连接 USB 串口、PCAN-USB 和 USB 相机。
@@ -217,7 +217,7 @@ cd /home/nvidia/Beingbeyond_D1_edu_nx
 
 CAN 默认检查右手；检查左手时加 `--hand-type left`。
 不加 `--check` 时，串口仍执行协议读取，CAN 和相机仅按硬件信息识别。
-完整开发用模拟回归测试由维护环境执行；本仓库 `tests/test_bilingual_diagnostics.py` 提供双语诊断回归测试。
+本仓库 `tests/` 提供设备识别、示例预检查及双语报错的无硬件回归测试。
 在已安装示例依赖的环境中运行 `python -m unittest discover -s tests`，不访问真实硬件。
 客户可使用第 3 节工具验证安装，使用本节工具验证已连接的设备。
 
@@ -235,48 +235,29 @@ cd /home/nvidia/Beingbeyond_D1_edu_nx/examples
 ```
 
 - 示例 1 自动识别 PCAN 并验证手部应答，然后执行手部动作并显示触觉窗口。
-- 示例 2 自动识别并验证头臂串口，然后使能头臂舵机并执行预设运动。
+- 示例 2 自动识别并验证头臂串口，然后使能头臂关节并执行预设运动。
 - 示例 3 通过 USB/V4L2 显示双目相机；不是 CSI/Argus 管线。
 
 窗口中的 `q` 用于退出，不代替实体急停。普通 SSH 不自动拥有桌面 GUI 显示能力。
 
 ## 6. 报错与对应设备排查
 
-排查时同时记录：运行的示例、配置的设备路径或接口名、完整异常信息。
-预检查报错会携带角色、候选端口及失败原因；运行包装层会补充所选端口与阶段，例如
-`[device] hand CAN port=can1 stage=status check: ...`。
-CAN 与相机的识别/通信错误会一起汇总；若其中任一失败，串口探测会跳过并明确列出未检查的角色。
-示例维护的报错和异常警告提供中英文说明，并补充相机线、遥操臂线和报错舵机 ID 的检查建议，
-详见 [双语排查说明](docs/TROUBLESHOOTING.md)。SDK/第三方库直接输出的日志仍可能为英文，应保留完整异常链；
-启动检查通过也不能保证运行期间设备不会断开。
+详见 [报错与自检 / Errors and checks](docs/TROUBLESHOOTING.md)。终端将中文和英文分行，
+每个故障只给对应的检查步骤，不重复输出无关串口和整段建议。
+头部、臂部关节分别编号；臂部连续后段无应答时，优先提示检查最后一个正常关节与第一个无应答关节之间的连线。
 
-Example failures include Chinese/English explanations and device-specific connection checks.
-Keep the original traceback; logs printed directly by binary SDKs/third-party libraries may remain English.
-
-| 报错或现象（文字可能因底层库而异） | 对应设备 | 优先检查 |
-| --- | --- | --- |
-| `[auto] ... no verified device`、`ambiguous devices` | 消息中列出的角色及候选端口 | 检查候选被排除的原因；多个匹配设备时显式配置目标，未枚举设备时检查 USB 与驱动 |
-| `identified as glove`、`error status 0x...` | 消息中的串口及舵机 ID | 前者表示头臂候选实际为手套；后者表示舵机已回复故障状态，不应当作舵机缺失 |
-| `Failed to open port ...`、串口 `Permission denied` 或 `No such file or directory` | 示例配置的头臂串口；示例 7/8 也可能是外骨骼或手套串口 | 路径是否存在、实际连接对象、当前会话 `dialout` 权限、端口占用 |
-| 串口能打开，但舵机读取超时、ID 无应答或通信异常 | 头臂串口及下游舵机链路 | 控制器是否选对、机器人供电、1 Mbps 波特率、接线和舵机 ID；超时不能直接证明舵机缺失 |
-| `CAN config failed`、`CAN up failed` 或 CAN 接口不存在 | 示例配置的 CAN 接口 | 是否误用了原生 `can0`、PCAN 是否枚举并加载驱动、配置命令的权限；按 PCAN 说明恢复 |
-| CAN 接口存在，但手部无数据或状态读取异常 | CAN 总线及手部设备 | 接口是否正确、是否 UP、波特率是否为 1 Mbps、是否 BUS-OFF、供电和接线；接口 UP 不等于手部有应答 |
-| `Could not open camera: ...` | 消息中的相机路径 | USB 枚举、by-id 链接目标、`video` 权限、设备占用；不要在尚未枚举时直接改成 `/dev/video0` |
-| `Failed to read frame`、`Frame size is too small`、`D1 camera capture failed` | 当前配置的相机 | 查看完整异常链确认设备与原因，核对采集格式、分辨率、USB 连接和带宽 |
-| Qt、显示服务器或 GUI 窗口初始化错误 | 本地图形会话 | 是否在 NX 桌面终端运行、`DISPLAY`/`WAYLAND_DISPLAY` 是否有效；GUI 错误不能直接归因于相机端口 |
-
-可用下面的命令查看节点权限和占用。`fuser` 由系统包 `psmisc` 提供，仅在已安装时使用：
+需要完整异常时使用 `D1_DEBUG=1`，设备诊断工具也支持 `--debug`：
 
 ```bash
-ls -l /dev/ttyACM0 /dev/v4l/by-id/usb-SunplusIT_Inc_SPCA2100_PC_Camera-video-index0
-id -nG
-fuser -v /dev/ttyACM0
-fuser -v /dev/v4l/by-id/usb-SunplusIT_Inc_SPCA2100_PC_Camera-video-index0
+python examples/device_detection.py --roles head_arm --check --debug
 ```
 
-将路径替换为实际设备。`fuser` 的可见范围受进程权限限制，没有输出也不能完全排除占用。
-若显示占用 PID，先确认对应程序，再正常退出该程序；这些命令不会结束进程。
-设备已经断开、节点不存在时，报错中的路径只是本次尝试打开的配置值，不能据此判断实际设备现在位于哪个端口。
+将 `python` 换为本机 SDK 环境的解释器。该工具不发送运动命令，但打开串口可能导致控制板复位。
+设备检查通过不保证运行期间不会断开。SDK 和第三方库直接输出的原始日志可能仍为英文。
+
+Errors show a specific next check in Chinese and English. Head and arm joints have separate numbering.
+For a responsive prefix followed by unresponsive arm joints, check the cable from the last responding joint to the first unresponsive joint.
+Use `D1_DEBUG=1` or the diagnostic tool's `--debug` option for full error details.
 
 ## 7. 已知边界与选配功能
 
