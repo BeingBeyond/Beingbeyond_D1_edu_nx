@@ -426,10 +426,11 @@ def resolve_camera_device(device="auto"):
 def resolve_devices(head_arm=None, exo=None, glove=None, can_iface=None, camera=None,
                     head_arm_baud=1_000_000, exo_baud=115200, glove_baud=115200,
                     exo_servo_ids=(1, 2, 3, 4, 5, 6), check_ready=False,
-                    hand_type="right", hand_baud=1_000_000):
+                    hand_type="right", hand_baud=1_000_000, auto_can_up=False):
     """Resolve devices and optionally verify communication before controller setup.
 
-    Readiness checks never configure CAN: it must already be UP at hand_baud.
+    With auto_can_up, readiness checks configure and start a DOWN CAN link.
+    Otherwise CAN checks are diagnostic only (including the standalone CLI).
     Passive failures are collected together; serial probes are then skipped.
     """
     if exo is not None:
@@ -446,7 +447,7 @@ def resolve_devices(head_arm=None, exo=None, glove=None, can_iface=None, camera=
         except DeviceDetectionError as exc:
             errors.append(exc)
     if check_ready:
-        errors.extend(_check_peripherals(result, hand_type, hand_baud))
+        errors.extend(_check_peripherals(result, hand_type, hand_baud, auto_can_up))
     requests = {role: value for role, value in
                 (("head_arm", head_arm), ("exo", exo), ("glove", glove)) if value is not None}
     if errors:
@@ -464,12 +465,15 @@ def resolve_devices(head_arm=None, exo=None, glove=None, can_iface=None, camera=
     return result
 
 
-def _check_peripherals(devices, hand_type, hand_baud):
+def _check_peripherals(devices, hand_type, hand_baud, auto_can_up=False):
     errors = []
     for role, device in devices.items():
         try:
             if role == "can_iface":
-                check_can(device, hand_type, hand_baud)
+                if auto_can_up:
+                    check_can(device, hand_type, hand_baud, auto_up=True)
+                else:
+                    check_can(device, hand_type, hand_baud)
             elif role == "camera":
                 check_camera(device)
         except Exception as exc:
@@ -477,13 +481,13 @@ def _check_peripherals(devices, hand_type, hand_baud):
     return errors
 
 
-def check_can(iface, hand_type="right", bitrate=1_000_000):
+def check_can(iface, hand_type="right", bitrate=1_000_000, auto_up=False):
     with device_operation("hand CAN", iface, "status check"):
-        _check_can(iface, hand_type, bitrate)
+        _check_can(iface, hand_type, bitrate, auto_up=auto_up)
 
 
-def _check_can(iface, hand_type, bitrate):
-    """Read fresh hand joint status on an already configured bus; never set it up."""
+def _check_can(iface, hand_type, bitrate, auto_up=False):
+    """Optionally start a DOWN link, then verify fresh hand joint status."""
     if hand_type not in ("left", "right"):
         raise configuration_error("hand_type", hand_type, "left / right")
     try:
@@ -504,6 +508,23 @@ def _check_can(iface, hand_type, bitrate):
         raise failure("C05", "CAN 接口 {} 已进入 BUS-OFF 状态。".format(iface), "CAN interface {} is BUS-OFF.".format(iface),
                       "请先检查手部供电和 CAN 接线，再按 README 恢复接口。", "Check hand power and CAN wiring, then recover the interface using README.")
     if "UP" not in link.get("flags", []):
+        if auto_up and link.get("linkinfo", {}).get("info_kind") == "can":
+            print("[CAN] 自动启动接口 / Bringing up {} at {} bit/s (restart-ms 100)".format(iface, bitrate), flush=True)
+            prefix = [] if os.geteuid() == 0 else ["sudo"]
+            try:
+                for command in (["ip", "link", "set", "dev", iface, "type", "can",
+                                 "bitrate", str(bitrate), "restart-ms", "100"],
+                                ["ip", "link", "set", "dev", iface, "up"]):
+                    subprocess.run(prefix + command, check=True, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, text=True)
+            except subprocess.CalledProcessError as exc:
+                raise failure("C03", "CAN 接口 {} 自动启动失败。".format(iface),
+                              "Failed to bring up CAN interface {} automatically.".format(iface),
+                              "请检查 sudo 权限和驱动，或按 README 手动配置接口。",
+                              "Check sudo permissions and the driver, or configure the interface using README.",
+                              details=[(exc.stderr or exc.stdout or str(exc)).strip()]) from exc
+            # Re-read kernel state and bitrate before opening a socket; do not retry setup.
+            return _check_can(iface, hand_type, bitrate)
         raise failure("C03", "CAN 接口 {} 尚未启动。".format(iface), "CAN interface {} is down.".format(iface),
                       "请按 README 启动这个接口，再运行示例。", "Bring up this interface using README, then retry.")
     actual = bus.get("bittiming", {}).get("bitrate")

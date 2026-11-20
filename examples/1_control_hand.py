@@ -11,7 +11,7 @@ This script:
 
 Use this example to verify that:
     - The hand is wired correctly
-    - The confirmed PCAN interface is configured at 1 Mbps before startup
+    - The confirmed PCAN interface is automatically brought up at 1 Mbps if DOWN
     - The hand responds correctly to high-level normalized joint commands.
     - The hand motion behavior under different speed and torque settings.
     - The tactile matrix frames are received and decoded.
@@ -141,40 +141,35 @@ def main():
     print("\033[91m警告：请始终保持实体急停按钮可触及 / WARNING: Always keep the physical emergency stop button within reach,\033[0m")
     print("\033[91m         运动异常时立即按下急停 / and press it immediately if the robot motion looks unsafe.\033[0m\n")
 
-    can_iface = resolve_devices(can_iface="auto", check_ready=True)["can_iface"]
+    can_iface = resolve_devices(can_iface="auto", check_ready=True, auto_can_up=True)["can_iface"]
     with device_operation("hand CAN", can_iface, "controller initialization"):
         right_hand = DexHand(hand_type="right", can_iface=can_iface)
 
     try:
-        with device_operation('hand CAN', can_iface, 'gesture_dance'):
+        with device_operation("hand CAN", can_iface, "hand motion demo"):
             right_hand.gesture_dance(duration_s=3, m=0.1, interval_s=0.1)
 
-        with device_operation('hand CAN', can_iface, 'open_hand'):
             right_hand.open_hand()
 
-        # right_hand.set_speed(speed=[0.1, 0.1, 0.1, 0.1, 0.1, 0.1])
-        # right_hand.set_torque(torque=[0.1, 0.1, 0.1, 0.1, 0.1, 0.1])
-        # right_hand.set_joint_pos([0.55, 0.8, 0.42, 0.45, 0, 0])
-        # time.sleep(1)
-        #
-        # right_hand.set_speed(speed=[1, 1, 1, 1, 1, 1])
-        # right_hand.set_torque(torque=[1, 1, 1, 1, 1, 1])
-        # right_hand.open_hand()
-        # time.sleep(1)
+            # right_hand.set_speed(speed=[0.1, 0.1, 0.1, 0.1, 0.1, 0.1])
+            # right_hand.set_torque(torque=[0.1, 0.1, 0.1, 0.1, 0.1, 0.1])
+            # right_hand.set_joint_pos([0.55, 0.8, 0.42, 0.45, 0, 0])
+            # time.sleep(1)
+            #
+            # right_hand.set_speed(speed=[1, 1, 1, 1, 1, 1])
+            # right_hand.set_torque(torque=[1, 1, 1, 1, 1, 1])
+            # right_hand.open_hand()
+            # time.sleep(1)
 
-        with device_operation('hand CAN', can_iface, 'set_joint_pos'):
             right_hand.set_joint_pos([0.0, 0.0, 1.0, 1.0, 1.0, 1.0])
 
-        with device_operation('hand CAN', can_iface, 'set_joint_pos'):
             right_hand.set_joint_pos([0.0, 0.8, 1.0, 1.0, 1.0, 1.0])
 
-        with device_operation('hand CAN', can_iface, 'set_joint_pos'):
             right_hand.set_joint_pos([0.6, 0.8, 1.0, 1.0, 1.0, 1.0])
 
-        with device_operation('hand CAN', can_iface, 'read_joint_pos'):
+        with device_operation("hand CAN", can_iface, "read_joint_pos"):
             print(right_hand.read_joint_pos())
-        time.sleep(1)
-        with device_operation('hand CAN', can_iface, 'read_joint_pos'):
+            time.sleep(1)
             print(right_hand.read_joint_pos())
 
         show_tactile_preview(right_hand, can_iface)

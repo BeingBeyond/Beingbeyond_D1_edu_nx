@@ -333,6 +333,76 @@ class PeripheralTests(unittest.TestCase):
             connect.assert_not_called()
             self.assertEqual(command.call_args[0][0], ["ip", "-json", "-details", "link", "show", "dev", "can7"])
 
+    def test_motion_preflight_requests_auto_can_startup(self):
+        with patch.object(detection, "check_can") as can_check:
+            result = detection.resolve_devices(can_iface="can7", hand_type="left",
+                                               hand_baud=500000, check_ready=True, auto_can_up=True)
+        self.assertEqual(result["can_iface"], "can7")
+        can_check.assert_called_once_with("can7", "left", 500000, auto_up=True)
+
+    def test_auto_start_down_link_then_verify_fresh_status(self):
+        import json
+        import struct
+        from unittest.mock import MagicMock
+        down = [{"flags": [], "linkinfo": {"info_kind": "can", "info_data": {"state": "STOPPED"}}}]
+        up = [{"flags": ["UP"], "linkinfo": {"info_kind": "can", "info_data": {
+            "state": "ERROR-ACTIVE", "bittiming": {"bitrate": 500000}}}}]
+        channel = MagicMock()
+        channel.__enter__.return_value = channel
+        channel.recv.return_value = struct.pack("=IB3x8s", 0x28, 7, b"\x01\x10\x20\x30\x40\x50\x60")
+        query = ["ip", "-json", "-details", "link", "show", "dev", "can7"]
+        for uid, prefix in ((1000, ["sudo"]), (0, [])):
+            with self.subTest(uid=uid), patch.object(detection.os, "geteuid", return_value=uid), \
+                    patch.object(detection.subprocess, "run", side_effect=[
+                        SimpleNamespace(stdout=json.dumps(down)), SimpleNamespace(stdout=""),
+                        SimpleNamespace(stdout=""), SimpleNamespace(stdout=json.dumps(up))]) as command, \
+                    patch.object(detection.socket, "socket", return_value=channel):
+                channel.reset_mock()
+                detection.check_can("can7", "left", 500000, auto_up=True)
+                self.assertEqual([call.args[0] for call in command.call_args_list], [
+                    query, prefix + ["ip", "link", "set", "dev", "can7", "type", "can",
+                                     "bitrate", "500000", "restart-ms", "100"],
+                    prefix + ["ip", "link", "set", "dev", "can7", "up"], query])
+                channel.bind.assert_called_once_with(("can7",))
+                channel.send.assert_called_once_with(struct.pack("=IB3x8s", 0x28, 1, b"\x01"))
+
+    def test_auto_start_does_not_reset_up_or_bus_off_links(self):
+        import json
+        for state, bitrate, error in (("BUS-OFF", 1000000, "BUS-OFF"),
+                                      ("ERROR-ACTIVE", 500000, "波特率不符")):
+            status = [{"flags": ["UP"], "linkinfo": {"info_kind": "can", "info_data": {
+                "state": state, "bittiming": {"bitrate": bitrate}}}}]
+            with self.subTest(state=state), \
+                    patch.object(detection.subprocess, "run", return_value=SimpleNamespace(stdout=json.dumps(status))) as command, \
+                    patch.object(detection.socket, "socket") as connect:
+                with self.assertRaisesRegex(detection.DeviceDetectionError, error):
+                    detection.check_can("can7", auto_up=True)
+                self.assertEqual(command.call_count, 1)
+                connect.assert_not_called()
+
+    def test_auto_start_failure_stops_before_opening_socket(self):
+        import subprocess
+        down = '[{"flags": [], "linkinfo": {"info_kind": "can"}}]'
+        for failed_step in (0, 1):
+            results = [SimpleNamespace(stdout=down)] + [SimpleNamespace(stdout="")] * failed_step
+            results.append(subprocess.CalledProcessError(1, ["ip"], stderr="permission denied"))
+            with self.subTest(failed_step=failed_step), \
+                    patch.object(detection.subprocess, "run", side_effect=results), \
+                    patch.object(detection.socket, "socket") as connect:
+                with self.assertRaisesRegex(detection.DeviceDetectionError, "自动启动失败") as caught:
+                    detection.check_can("can7", auto_up=True)
+                self.assertEqual(caught.exception.__cause__.stderr, "permission denied")
+                connect.assert_not_called()
+
+    def test_auto_start_rechecks_link_and_does_not_loop_if_still_down(self):
+        down = SimpleNamespace(stdout='[{"flags": [], "linkinfo": {"info_kind": "can"}}]')
+        with patch.object(detection.subprocess, "run", side_effect=[down, SimpleNamespace(), SimpleNamespace(), down]) as command, \
+                patch.object(detection.socket, "socket") as connect:
+            with self.assertRaisesRegex(detection.DeviceDetectionError, "尚未启动"):
+                detection.check_can("can7", auto_up=True)
+            self.assertEqual(command.call_count, 4)
+            connect.assert_not_called()
+
     def test_can_bus_off_is_rejected_before_sending(self):
         status = '[{"flags":["UP"],"linkinfo":{"info_data":{"state":"BUS-OFF","bittiming":{"bitrate":1000000}}}}]'
         with patch.object(detection.subprocess, "run", return_value=SimpleNamespace(stdout=status)), \

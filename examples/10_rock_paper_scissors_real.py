@@ -8,7 +8,9 @@ Pipeline:
 
 This example moves the head + arm to an initial pose, then controls the
 DexHand during the game. Keep the physical emergency stop button within reach.
-Press q in the OpenCV camera window to exit.
+Capture, recognition and OpenCV stay on the main thread; robot commands run
+serially in a worker. Each clearance sequence finishes before the latest gesture
+is applied; pending gestures do not accumulate. Press q to interrupt waits and exit.
 """
 
 from diagnostics import configuration_error, missing_joints_error, target_warning
@@ -22,6 +24,7 @@ if __name__ == "__main__":
 import importlib
 import random
 import sys
+import threading
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -93,12 +96,6 @@ class HandCfg:
     speed: Tuple[float, ...] = (1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
     torque: Tuple[float, ...] = (1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
     open_value: float = 0.0
-    closed_value: float = 1.0
-    thumb_pitch_value: float = 0.7
-    thumb_yaw_value: float = 0.5
-    non_thumb_delay_s: float = 0.15
-    thumb_yaw_delay_s: float = 0.05
-    thumb_pitch_delay_s: float = 0.2
 
 
 @dataclass(frozen=True)
@@ -292,32 +289,35 @@ def winning_gesture(human_gesture: str) -> Optional[str]:
 
 def build_real_hand_gesture_sequences(cfg: HandCfg) -> Dict[str, Tuple[Tuple[np.ndarray, float], ...]]:
     open_value = float(cfg.open_value)
-    closed_value = float(cfg.closed_value)
-    thumb_pitch = float(cfg.thumb_pitch_value)
-    thumb_yaw = float(cfg.thumb_yaw_value)
 
     return {
         "paper": ((np.full(6, open_value, dtype=np.float64), 0.0),),
         # DexHand order: thumb pitch, thumb yaw, index, middle, ring, pinky.
+        # Close the four fingers before moving the thumb into the rock pose.
         "rock": (
-            (np.asarray([open_value, open_value, closed_value, closed_value, closed_value, closed_value], dtype=np.float64), cfg.non_thumb_delay_s),
-            (np.asarray([open_value, thumb_yaw, closed_value, closed_value, closed_value, closed_value], dtype=np.float64), cfg.thumb_yaw_delay_s),
-            (np.asarray([thumb_pitch, thumb_yaw, closed_value, closed_value, closed_value, closed_value], dtype=np.float64), cfg.thumb_pitch_delay_s),
+            (np.asarray([0.3, 0.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float64), 0.8),
+            (np.asarray([0.7, 1.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float64), 0.0),
         ),
+        # Clear the thumb before extending the index and middle fingers.
         "scissors": (
-            (np.asarray([open_value, open_value, open_value, open_value, closed_value, closed_value], dtype=np.float64), cfg.non_thumb_delay_s),
-            (np.asarray([open_value, thumb_yaw, open_value, open_value, closed_value, closed_value], dtype=np.float64), cfg.thumb_yaw_delay_s),
-            (np.asarray([thumb_pitch, thumb_yaw, open_value, open_value, closed_value, closed_value], dtype=np.float64), cfg.thumb_pitch_delay_s),
+            (np.asarray([0.7, 0.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float64), 0.5),
+            (np.asarray([0.7, 0.0, 0.0, 0.0, 1.0, 1.0], dtype=np.float64), 0.5),
+            (np.asarray([1.0, 0.8, 0.0, 0.0, 1.0, 1.0], dtype=np.float64), 0.0),
         ),
     }
 
 
-def apply_real_hand_gesture_sequence(hand: DexHand, sequence: Tuple[Tuple[np.ndarray, float], ...], can_iface="未指定 / unspecified") -> None:
+def apply_real_hand_gesture_sequence(hand: DexHand, sequence: Tuple[Tuple[np.ndarray, float], ...], can_iface="未指定 / unspecified", stop_event=None) -> None:
     for qpos, delay_s in sequence:
+        if stop_event is not None and stop_event.is_set():
+            return
         with device_operation('hand CAN', can_iface, 'set_joint_pos'):
             hand.set_joint_pos(np.clip(qpos, 0.0, 1.0).tolist())
         if delay_s > 0.0:
-            time.sleep(delay_s)
+            if stop_event is None:
+                time.sleep(delay_s)
+            elif stop_event.wait(delay_s):
+                return
 
 
 def build_rps_head_arm_postures() -> Dict[str, Tuple[Tuple[float, ...], Tuple[float, ...]]]:
@@ -501,6 +501,90 @@ class IdleMotion:
         return self.mode
 
 
+class RpsMotionWorker:
+    """Own runtime robot commands; keep capture and OpenCV on the main thread.
+
+    Finish each gesture's clearance sequence before taking the latest request.
+    There is no command backlog. Shutdown alone interrupts a sequence's delays.
+    """
+
+    def __init__(self, head_arm, hand, gestures, postures, arm_cfg, idle_motion,
+                 devices, clock=time.monotonic):
+        self.head_arm = head_arm
+        self.hand = hand
+        self.gestures = gestures
+        self.postures = postures
+        self.arm_cfg = arm_cfg
+        self.idle_motion = idle_motion
+        self.devices = devices
+        self.clock = clock
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._requested = None
+        self._error = None
+        self._last_gesture = None
+        self._inactive_since = clock()
+        self._thread = threading.Thread(target=self._run, name="rps-motion")
+
+    def start(self):
+        self._thread.start()
+
+    def request(self, gesture):
+        if gesture is not None and gesture not in self.gestures:
+            raise ValueError("Unknown robot gesture: {}".format(gesture))
+        self.raise_if_failed()
+        with self._lock:
+            self._requested = gesture
+
+    def raise_if_failed(self):
+        with self._lock:
+            error = self._error
+        if error is not None:
+            raise error
+
+    def close(self):
+        self._stop.set()
+        if self._thread.ident is not None:
+            # Never close controllers while the worker may still be using them.
+            self._thread.join()
+
+    def _update(self):
+        with self._lock:
+            gesture = self._requested
+        now = self.clock()
+        if gesture is not None:
+            self._inactive_since = now
+            self.idle_motion.reset()
+            if gesture != self._last_gesture:
+                apply_rps_head_arm_posture(
+                    self.head_arm, gesture, self.postures, self.arm_cfg,
+                    arm_dev=self.devices["head_arm"],
+                )
+                if self._stop.is_set():
+                    return
+                apply_real_hand_gesture_sequence(
+                    self.hand, self.gestures[gesture],
+                    can_iface=self.devices["can_iface"], stop_event=self._stop,
+                )
+                self._last_gesture = gesture
+                self._inactive_since = self.clock()
+        else:
+            self._last_gesture = None
+            if (self.idle_motion.cfg.enabled
+                    and now - self._inactive_since >= self.idle_motion.cfg.trigger_after_s):
+                self.idle_motion.update(self.head_arm, self.hand, now)
+
+    def _run(self):
+        try:
+            while not self._stop.is_set():
+                self._update()
+                self._stop.wait(0.01)
+        except Exception as exc:
+            with self._lock:
+                self._error = exc
+            self._stop.set()
+
+
 def move_head_arm_to_initial_pose(head_arm: HeadArmRobot, cfg: HeadArmCfg) -> None:
     q_init_deg = list(cfg.q_init_deg)
     if len(q_init_deg) != 8:
@@ -555,7 +639,7 @@ def main() -> None:
     hand_cfg = HandCfg()
     devices = resolve_devices(head_arm=head_arm_cfg.dev, can_iface=hand_cfg.can_iface,
                               camera=stereo_cfg.device, head_arm_baud=head_arm_cfg.baudrate,
-                              check_ready=True, hand_type=hand_cfg.hand_type, hand_baud=hand_cfg.baudrate)
+                              check_ready=True, auto_can_up=True, hand_type=hand_cfg.hand_type, hand_baud=hand_cfg.baudrate)
     head_arm_cfg = replace(head_arm_cfg, dev=devices["head_arm"])
     hand_cfg = replace(hand_cfg, can_iface=devices["can_iface"])
     stereo_cfg = replace(stereo_cfg, device=devices["camera"])
@@ -578,6 +662,7 @@ def main() -> None:
 
     head_arm = None
     right_hand = None
+    motion_worker = None
     try:
         with device_operation('head_arm', head_arm_cfg.dev, 'controller initialization'):
             head_arm = HeadArmRobot(
@@ -610,9 +695,13 @@ def main() -> None:
             ready_hand_q_norm=(hand_cfg.open_value,) * 6,
             devices=devices,
         )
-        inactive_since = time.monotonic()
         last_robot_gesture = None
         last_scores = None
+
+        motion_worker = RpsMotionWorker(
+            head_arm, right_hand, robot_gestures, rps_head_arm_postures,
+            rps_arm_cfg, idle_motion, devices,
+        )
 
         print("Starting real DexHand rock-paper-scissors. Press q in the OpenCV window to exit.")
         with StereoRGBCamera(
@@ -624,7 +713,9 @@ def main() -> None:
             swap_lr=stereo_cfg.swap_lr,
             view=stereo_cfg.view,
         ) as camera:
+            motion_worker.start()
             while True:
+                motion_worker.raise_if_failed()
                 now = time.time()
                 dt = now - last_time
                 last_time = now
@@ -643,7 +734,6 @@ def main() -> None:
                 human_raw = "unknown"
                 human_stable = stable.last_stable
                 robot_gesture = last_robot_gesture
-                active_rps = False
 
                 if joint_pos is None:
                     human_stable = stable.update("unknown", rps_cfg.stable_frames, rps_cfg.unknown_reset_frames)
@@ -657,22 +747,9 @@ def main() -> None:
                     human_raw = classify_rps(last_scores, rps_cfg.thresholds)
                     human_stable = stable.update(human_raw, rps_cfg.stable_frames, rps_cfg.unknown_reset_frames)
                     robot_gesture = winning_gesture(human_stable)
-                    active_rps = robot_gesture is not None
 
                     if human_stable == "unknown":
                         last_robot_gesture = None
-
-                    if robot_gesture is not None and robot_gesture != last_robot_gesture:
-                        idle_motion.reset()
-                        apply_rps_head_arm_posture(
-                            head_arm,
-                            robot_gesture,
-                            rps_head_arm_postures,
-                            rps_arm_cfg,
-                            arm_dev=head_arm_cfg.dev,
-                        )
-                        apply_real_hand_gesture_sequence(right_hand, robot_gestures[robot_gesture], can_iface=hand_cfg.can_iface)
-                        last_robot_gesture = robot_gesture
 
                     if frame_idx % 30 == 0:
                         print(
@@ -680,11 +757,8 @@ def main() -> None:
                             f"robot={robot_gesture} scores={last_scores}"
                         )
 
-                if active_rps:
-                    inactive_since = time.monotonic()
-                    idle_motion.reset()
-                elif idle_cfg.enabled and time.monotonic() - inactive_since >= idle_cfg.trigger_after_s:
-                    idle_motion.update(head_arm, right_hand, time.monotonic())
+                motion_worker.request(robot_gesture)
+                last_robot_gesture = robot_gesture
 
                 overlay = draw_overlay(
                     camera.draw_info(bgr_view, fps),
@@ -705,6 +779,8 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        if motion_worker is not None:
+            motion_worker.close()
         try:
             cv2.destroyAllWindows()
         except Exception:

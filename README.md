@@ -126,9 +126,12 @@ Python 运行后出现的 `__pycache__` 是本地缓存，不应提交；重新�
 其他 USB 型号、多台同型号设备或需要固定绑定时，可显式指定路径或接口。
 运动示例仍会对显式指定的串口执行协议验证；显式配置只绕过 USB 身份筛选，不绕过通信预检查。
 
-使用 CAN 的运动示例会先验证接口状态、波特率和所选左/右手的实际应答；
+使用 CAN 的运动示例会先将 DOWN 的目标接口自动配置为所需波特率（默认 1 Mbps）、`restart-ms 100` 并启动，
+随后验证接口状态、波特率和所选左/右手的实际应答；自动启动可能提示输入 sudo 密码。
+已 UP 的接口不会重配，波特率不符或 BUS-OFF 仍会报错；
 使用 `D1Robot` 的示例及示例 8/10 还会在控制器初始化前检查相机取帧。
-预检查只监听、读取串口寄存器/位置、请求 CAN 状态或采集图像，不使能关节、不移动关节，也不配置 CAN。
+预检查只监听、读取串口寄存器/位置、请求 CAN 状态或采集图像，不使能关节、不移动关节。
+CAN 自动配置仅在运动示例启动 DOWN 接口时执行；独立的 `device_detection.py --check` 不配置 CAN。
 打开串口仍可能使部分控制板复位。
 
 机器人正常供电后，分别连接 USB 串口、PCAN-USB 和 USB 相机。
@@ -175,7 +178,7 @@ USB 型号或 VID/PID 只能帮助确认候选设备；同型号适配器可能�
 
 | 示例 | 当前配置 | 实际设备不同时的修改位置 |
 | --- | --- | --- |
-| [1：灵巧手](examples/1_control_hand.py) | `resolve_devices(can_iface="auto", check_ready=True)` | `main()` 中传入 `resolve_devices` 的 `can_iface` |
+| [1：灵巧手](examples/1_control_hand.py) | `resolve_devices(can_iface="auto", check_ready=True, auto_can_up=True)` | `main()` 中传入 `resolve_devices` 的 `can_iface` |
 | [2：头臂](examples/2_control_head_arm.py) | `resolve_head_arm("auto")` | `main()` 中传入 `resolve_head_arm` 的串口路径 |
 | [3：相机](examples/3_show_vision.py) | `device = "auto"` | `main()` 中的 `device` |
 | [4：整机联动，未验收](examples/4_control_d1.py) | 头臂、手部 CAN、相机均为 `auto` | 命令行参数 `--arm-dev`、`--hand-can`、`--camera` |
@@ -188,10 +191,10 @@ USB 型号或 VID/PID 只能帮助确认候选设备；同型号适配器可能�
 
 验证设备的原生 `can0` 属于 NVIDIA `mttcan`，不是 USB PCAN。
 驱动加载、接口确认和 1 Mbps 配置见 [PCAN 说明](lib/pcan/README.md)。
-**附带驱动没有自动加载/开机拉起配置，重启或拔插后需要检查并手动恢复。**
+**附带驱动没有自动加载/开机拉起配置，重启或拔插后需要检查驱动是否已加载；运动示例可自动启动已识别的 DOWN 接口。**
 `.ko` 必须与目标内核 ABI 匹配，不能仅凭 ARM64 架构相同就加载。
-运行运动示例或下文 `--check` 前，须按 PCAN 说明将确认的接口配置为 UP、1 Mbps。
-自动识别只选择接口，不自动加载驱动或拉起总线；总线未就绪时会在控制器初始化前报错。
+运行下文独立的 `--check` 前，须按 PCAN 说明将确认的接口配置为 UP、1 Mbps。
+运动示例可在识别接口后自动配置并启动 DOWN 总线，但不会自动加载驱动；配置或通信失败时会在控制器初始化前报错。
 
 缺少串口/视频权限时，确认后将运行用户加入对应组：
 

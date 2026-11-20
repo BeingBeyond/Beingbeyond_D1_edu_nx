@@ -39,6 +39,7 @@ class ExampleIntegrationTests(unittest.TestCase):
         self.assertEqual(cfg.glove_port, "auto")
         self.assertEqual(resolve.call_args[1]["exo_servo_ids"], [2, 3, 4, 5, 6, 7])
         self.assertTrue(resolve.call_args[1]["check_ready"])
+        self.assertTrue(resolve.call_args[1]["auto_can_up"])
 
     def test_disabled_camera_is_omitted_from_teleop_preflight(self):
         from exo_glove_teleop_common import resolve_teleop_devices

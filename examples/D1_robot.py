@@ -28,7 +28,7 @@ class D1Robot:
         devices = resolve_devices(head_arm=arm_dev, can_iface=hand_can,
                                   camera=vision_device if enable_vision else None,
                                   head_arm_baud=arm_baud, hand_type=hand_type,
-                                  hand_baud=hand_baud, check_ready=True)
+                                  hand_baud=hand_baud, check_ready=True, auto_can_up=True)
         self.devices = devices
         try:
             if enable_vision:

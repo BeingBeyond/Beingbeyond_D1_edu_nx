@@ -38,7 +38,7 @@ class RuntimePreflightTests(unittest.TestCase):
         with patch.dict(main.__globals__, resolve_devices=preflight, DexHand=controller), redirect_stdout(StringIO()):
             with self.assertRaisesRegex(detection.DeviceDetectionError, "CAN no response"):
                 main()
-        preflight.assert_called_once_with(can_iface="auto", check_ready=True)
+        preflight.assert_called_once_with(can_iface="auto", check_ready=True, auto_can_up=True)
         controller.assert_not_called()
 
     def test_head_example_cannot_initialize_after_detection_failure(self):
@@ -59,6 +59,7 @@ class RuntimePreflightTests(unittest.TestCase):
             robot = runtime.D1Robot(**self.args, enable_vision=False)
             self.assertIsNone(resolve.call_args[1]["camera"])
             self.assertTrue(resolve.call_args[1]["check_ready"])
+            self.assertTrue(resolve.call_args[1]["auto_can_up"])
             self.assertEqual(resolve.call_args[1]["hand_type"], "left")
             robot.close(home=False, open_hand=False)
         camera.assert_not_called()

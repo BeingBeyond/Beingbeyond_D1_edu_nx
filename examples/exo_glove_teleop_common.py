@@ -66,7 +66,7 @@ def resolve_teleop_devices(cfg):
                     exo_servo_ids=cfg.arm_exo_servo_ids, check_ready=True)
     if hasattr(cfg, "robot_arm_dev"):
         requests.update(head_arm=cfg.robot_arm_dev, head_arm_baud=cfg.robot_arm_baud,
-                        can_iface=cfg.robot_hand_can,
+                        can_iface=cfg.robot_hand_can, auto_can_up=True,
                         hand_type=cfg.robot_hand_type, hand_baud=cfg.robot_hand_baud,
                         camera=cfg.robot_vision_device if getattr(cfg, "enable_camera", True) else None)
     devices = resolve_devices(**requests)
