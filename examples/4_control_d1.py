@@ -19,7 +19,7 @@ Use this example as a high-level integration demo to:
 """
 from __future__ import annotations
 
-from diagnostics import BilingualArgumentParser, install_error_hook, report_error
+from d1_example_errors import BilingualArgumentParser, install_error_hook, report_error
 
 if __name__ == "__main__":
     install_error_hook()

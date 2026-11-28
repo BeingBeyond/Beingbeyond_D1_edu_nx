@@ -9,23 +9,24 @@ Pipeline:
 Press q in the OpenCV camera window, or close the Isaac Gym viewer, to exit.
 """
 
-from diagnostics import configuration_error, missing_joints_error, failure
 
-
-from diagnostics import install_error_hook, report_error, require_display
+from d1_example_errors import (
+    configuration_error,
+    failure,
+    install_error_hook,
+    report_error,
+    require_display,
+)
 
 if __name__ == "__main__":
     install_error_hook()
 
 from device_detection import device_operation
 
-import importlib
 import os
-import sys
 import time
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, Tuple
 
 import cv2
 import numpy as np
@@ -36,21 +37,13 @@ from isaacgym import gymapi
 from beingbeyond_d1_edu_sdk.urdf_path import get_default_urdf_path
 
 
-EXAMPLES_DIR = Path(__file__).resolve().parent
-D1_EDU_DIR = EXAMPLES_DIR.parent
-DEX_RETARGETING_DIR = D1_EDU_DIR / "lib" / "dex-retargeting"
-DEX_VECTOR_EXAMPLE_DIR = DEX_RETARGETING_DIR / "example" / "vector_retargeting"
-
-sys.path.append(str(DEX_RETARGETING_DIR))
-sys.path.append(str(DEX_VECTOR_EXAMPLE_DIR))
-
-from dex_retargeting.constants import RobotName, RetargetingType, HandType, get_default_config_path
-from dex_retargeting.retargeting_config import RetargetingConfig
-from single_hand_detector import SingleHandDetector
 from vision import StereoRGBCamera
+from rps_common import (
+    FINGER_ORDER, SingleHandDetector, StableGesture, StereoCfg, draw_overlay,
+    finger_bend_scores, infer_finger_indices, init_right_hand_retargeting,
+    retarget_joint_pos, winning_gesture,
+)
 
-
-FINGER_ORDER = ("thumb", "index", "middle", "ring", "pinky")
 HEAD_ARM_JOINT_NAMES = (
     "joint_7_head_yaw",
     "joint_8_head_pitch",
@@ -61,12 +54,6 @@ HEAD_ARM_JOINT_NAMES = (
     "joint_5",
     "joint_6",
 )
-GESTURE_LABELS = {
-    "rock": "ROCK",
-    "paper": "PAPER",
-    "scissors": "SCISSORS",
-    "unknown": "UNKNOWN",
-}
 
 
 @dataclass(frozen=True)
@@ -119,18 +106,8 @@ class HeadArmCfg:
 
 
 @dataclass(frozen=True)
-class StereoCfg:
-    device: str = "auto"
-    single_width: int = 640
-    single_height: int = 480
-    fps: int = 30
-    fourcc: str = "MJPG"
-    swap_lr: bool = False
-    view: str = "both"
-
-
-@dataclass(frozen=True)
 class RpsCfg:
+    show_scores: bool = False
     thumb_threshold: float = 0.45
     index_threshold: float = 0.45
     middle_threshold: float = 0.45
@@ -155,32 +132,6 @@ class RpsCfg:
             "ring": self.ring_threshold,
             "pinky": self.pinky_threshold,
         }
-
-
-@dataclass
-class StableGesture:
-    last_raw: str = "unknown"
-    last_stable: str = "unknown"
-    count: int = 0
-    unknown_count: int = 0
-
-    def update(self, raw: str, stable_frames: int, unknown_reset_frames: int) -> str:
-        if raw == self.last_raw:
-            self.count += 1
-        else:
-            self.last_raw = raw
-            self.count = 1
-
-        if raw == "unknown":
-            self.unknown_count += 1
-            if self.unknown_count >= unknown_reset_frames:
-                self.last_stable = "unknown"
-            return self.last_stable
-
-        self.unknown_count = 0
-        if self.count >= stable_frames:
-            self.last_stable = raw
-        return self.last_stable
 
 
 def create_sim(gym, cfg: SimCfg) -> gymapi.Sim:
@@ -310,63 +261,6 @@ def build_qpos_map(gym_joint_names, retarget_joint_names) -> np.ndarray:
     return np.array(mapping, dtype=np.int32)
 
 
-def init_right_hand_retargeting():
-    robot_name = RobotName.d1hand
-
-    dex_pkg = importlib.util.find_spec("dex_retargeting")
-    if dex_pkg and dex_pkg.origin:
-        robot_dir = Path(dex_pkg.origin).absolute().parent.parent / "assets" / "robots" / "hands"
-    else:
-        robot_dir = DEX_RETARGETING_DIR / "assets" / "robots" / "hands"
-    RetargetingConfig.set_default_urdf_dir(str(robot_dir))
-
-    config_path = get_default_config_path(robot_name, RetargetingType.dexpilot, HandType.right)
-    return RetargetingConfig.load_from_file(config_path).build()
-
-
-def retarget_joint_pos(retargeting, joint_pos: np.ndarray) -> np.ndarray:
-    retargeting_type = retargeting.optimizer.retargeting_type
-    indices = retargeting.optimizer.target_link_human_indices
-
-    if retargeting_type == "POSITION":
-        ref_value = joint_pos[indices, :]
-    else:
-        origin_indices = indices[0, :]
-        task_indices = indices[1, :]
-        ref_value = joint_pos[task_indices, :] - joint_pos[origin_indices, :]
-
-    return retargeting.retarget(ref_value)
-
-
-def infer_finger_indices(joint_names) -> Dict[str, Tuple[int, ...]]:
-    aliases = {
-        "thumb": ("thumb",),
-        "index": ("index",),
-        "middle": ("middle",),
-        "ring": ("ring",),
-        "pinky": ("pinky", "little"),
-    }
-    indices = {finger: [] for finger in FINGER_ORDER}
-    for i, name in enumerate(joint_names):
-        lname = name.lower()
-        for finger, keys in aliases.items():
-            if any(key in lname for key in keys):
-                indices[finger].append(i)
-
-    missing = [finger for finger, values in indices.items() if not values]
-    if missing:
-        raise missing_joints_error(missing)
-    return {finger: tuple(values) for finger, values in indices.items()}
-
-
-def finger_bend_scores(qpos: np.ndarray, finger_indices: Dict[str, Tuple[int, ...]]) -> Dict[str, float]:
-    scores = {}
-    for finger, indices in finger_indices.items():
-        values = np.abs(qpos[list(indices)])
-        scores[finger] = float(np.max(values))
-    return scores
-
-
 def classify_rps(scores: Dict[str, float], thresholds: Dict[str, float]) -> str:
     bent = {finger: scores[finger] >= thresholds[finger] for finger in FINGER_ORDER}
 
@@ -386,14 +280,6 @@ def classify_rps(scores: Dict[str, float], thresholds: Dict[str, float]) -> str:
         return "scissors"
 
     return "unknown"
-
-
-def winning_gesture(human_gesture: str) -> Optional[str]:
-    return {
-        "rock": "paper",
-        "paper": "scissors",
-        "scissors": "rock",
-    }.get(human_gesture)
 
 
 def set_thumb_values(qpos: np.ndarray, joint_names, thumb_indices: Tuple[int, ...], pitch: float, yaw: float) -> None:
@@ -467,49 +353,6 @@ def apply_robot_qpos(
     gym.set_actor_dof_position_targets(env, actor, targets)
 
 
-def apply_robot_gesture_sequence(
-    gym,
-    env,
-    actor,
-    targets: np.ndarray,
-    qpos_map: np.ndarray,
-    sequence: Tuple[Tuple[np.ndarray, float], ...],
-) -> None:
-    for qpos, delay_s in sequence:
-        apply_robot_qpos(gym, env, actor, targets, qpos_map, qpos)
-        if delay_s > 0.0:
-            time.sleep(delay_s)
-
-
-def draw_overlay(
-    image: np.ndarray,
-    fps: float,
-    human: str,
-    robot: Optional[str],
-    scores: Optional[Dict[str, float]],
-    thresholds: Dict[str, float],
-) -> np.ndarray:
-    out = image.copy()
-    lines = [
-        f"FPS: {fps:.1f}",
-        f"Human: {GESTURE_LABELS.get(human, human)}",
-        f"D1: {GESTURE_LABELS.get(robot, robot) if robot else '-'}",
-    ]
-    if scores is not None:
-        score_text = " ".join(
-            f"{finger[0]}:{scores[finger]:.2f}/{thresholds[finger]:.2f}"
-            for finger in FINGER_ORDER
-        )
-        lines.append(score_text)
-    lines.append("q: quit")
-
-    for i, line in enumerate(lines):
-        y = 28 + i * 26
-        cv2.putText(out, line, (12, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 3, cv2.LINE_AA)
-        cv2.putText(out, line, (12, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1, cv2.LINE_AA)
-    return out
-
-
 def main() -> None:
     require_display()
     asset_cfg = AssetCfg()
@@ -561,12 +404,12 @@ def main() -> None:
         print(f"警告：仿真模型缺少以下重定向关节，已跳过；请核对模型和映射 / WARNING: Retargeted joints missing in Isaac asset and will be skipped: {missing}")
 
     window_name = "D1 RPS RGB"
-    last_time = time.time()
+    last_time = time.monotonic()
     fps = 0.0
-    frame_idx = 0
+    pending_steps = iter(())
+    next_step_at = 0.0
     stable = StableGesture()
     last_robot_gesture = None
-    last_scores = None
 
     print("Starting D1 rock-paper-scissors. Press q in the OpenCV window to exit.")
     try:
@@ -580,7 +423,7 @@ def main() -> None:
             view=stereo_cfg.view,
         ) as camera:
             while not gym.query_viewer_has_closed(viewer):
-                now = time.time()
+                now = time.monotonic()
                 dt = now - last_time
                 last_time = now
                 if dt > 0:
@@ -595,46 +438,38 @@ def main() -> None:
                 rgb = cv2.cvtColor(bgr_view, cv2.COLOR_BGR2RGB)
                 _, joint_pos, _, _ = detector.detect(rgb)
 
-                human_raw = "unknown"
                 human_stable = stable.last_stable
                 robot_gesture = last_robot_gesture
 
-                if joint_pos is None:
-                    if frame_idx % 30 == 0:
-                        print("Right hand is not detected.")
-                else:
+                scores = None
+                if joint_pos is not None:
                     human_qpos = retarget_joint_pos(retargeting, joint_pos)
-                    last_scores = finger_bend_scores(human_qpos, finger_indices)
-                    human_raw = classify_rps(last_scores, rps_cfg.thresholds)
+                    scores = finger_bend_scores(human_qpos, finger_indices)
+                    human_raw = classify_rps(scores, rps_cfg.thresholds)
+                    previous = human_stable
                     human_stable = stable.update(human_raw, rps_cfg.stable_frames, rps_cfg.unknown_reset_frames)
                     robot_gesture = winning_gesture(human_stable)
-
-                    if human_stable == "unknown":
-                        last_robot_gesture = None
-
+                    if human_stable != previous:
+                        print(f"Human: {human_stable} | D1: {robot_gesture or '-'}")
                     if robot_gesture is not None and robot_gesture != last_robot_gesture:
-                        apply_robot_gesture_sequence(
-                            gym=gym,
-                            env=env,
-                            actor=actor,
-                            targets=current_targets,
-                            qpos_map=qpos_map,
-                            sequence=robot_gestures[robot_gesture],
-                        )
-                        last_robot_gesture = robot_gesture
+                        pending_steps = iter(robot_gestures[robot_gesture])
+                        next_step_at = 0.0
+                    last_robot_gesture = robot_gesture
 
-                    if frame_idx % 30 == 0:
-                        print(
-                            f"raw={human_raw} stable={human_stable} "
-                            f"robot={robot_gesture} scores={last_scores}"
-                        )
+                if now >= next_step_at:
+                    step = next(pending_steps, None)
+                    if step is not None:
+                        qpos, delay = step
+                        apply_robot_qpos(gym, env, actor, current_targets, qpos_map, qpos)
+                        next_step_at = time.monotonic() + delay
 
                 overlay = draw_overlay(
-                    camera.draw_info(bgr_view, fps),
+                    bgr_view,
+                    camera=camera,
                     fps=fps,
                     human=human_stable,
                     robot=robot_gesture,
-                    scores=last_scores,
+                    scores=scores if rps_cfg.show_scores else None,
                     thresholds=rps_cfg.thresholds,
                 )
                 with device_operation("display", "OpenCV", "visualization"):
@@ -649,7 +484,6 @@ def main() -> None:
                 gym.draw_viewer(viewer, sim, True)
                 gym.sync_frame_time(sim)
 
-                frame_idx += 1
     finally:
         cv2.destroyAllWindows()
         gym.destroy_viewer(viewer)

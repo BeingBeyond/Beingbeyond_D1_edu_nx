@@ -25,7 +25,7 @@ Usage:
 """
 
 
-from diagnostics import install_error_hook
+from d1_example_errors import install_error_hook
 
 if __name__ == "__main__":
     install_error_hook()
@@ -44,18 +44,10 @@ import numpy as np
 from beingbeyond_d1_edu_sdk.pin_kinematics import (
     D1Kinematics,
     D1KinematicsConfig,
-    IKOptions,
 )
 from beingbeyond_d1_edu_sdk.urdf_path import get_default_urdf_path
 from D1_robot import D1Robot
-
-
-def deg_list_to_rad(xs):
-    return [math.radians(v) for v in xs]
-
-
-def rad_list_to_deg(xs):
-    return [math.degrees(v) for v in xs]
+from utils import deg_list_to_rad, rad_list_to_deg
 
 
 def _getch_nonblocking(timeout: float):

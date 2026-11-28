@@ -8,7 +8,7 @@ This script:
 
 Press 'q' in the OpenCV window to exit.
 """
-from diagnostics import install_error_hook, report_error, require_display
+from d1_example_errors import install_error_hook, report_error, require_display
 
 if __name__ == "__main__":
     install_error_hook()

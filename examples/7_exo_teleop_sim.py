@@ -1,6 +1,10 @@
-from diagnostics import configuration_error, missing_joints_error
-
-from diagnostics import install_error_hook, report_error, warn_exo_readings
+from d1_example_errors import (
+    configuration_error,
+    install_error_hook,
+    missing_joints_error,
+    report_error,
+    warn_exo_readings,
+)
 
 if __name__ == "__main__":
     install_error_hook()

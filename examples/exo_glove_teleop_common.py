@@ -1,5 +1,3 @@
-from diagnostics import configuration_error, model_file_error, failure
-
 import math
 import time
 from dataclasses import replace
@@ -11,7 +9,13 @@ import numpy as np
 from beingbeyond_d1_edu_sdk.exo import ExoDriver, ExoDriverCfg
 from beingbeyond_d1_edu_sdk.glove_driver import GloveConfig
 from device_detection import resolve_devices, device_operation
-from diagnostics import joint_read_error, validate_exo_ids
+from d1_example_errors import (
+    configuration_error,
+    failure,
+    joint_read_error,
+    model_file_error,
+    validate_exo_ids,
+)
 
 
 RED = "\033[31m"

@@ -14,7 +14,7 @@ from unittest.mock import Mock, patch
 
 EXAMPLES = Path(os.environ.get("D1_EXAMPLES_DIR", str(Path(__file__).resolve().parents[1] / "examples"))).resolve()
 sys.path.insert(0, str(EXAMPLES))
-import diagnostics as diag
+import d1_example_errors as diag
 import device_detection as detection
 
 

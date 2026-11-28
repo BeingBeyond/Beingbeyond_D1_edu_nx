@@ -15,10 +15,9 @@ Keyboard in the Isaac Gym viewer:
 Close the Isaac Gym viewer or the slider panel to exit.
 """
 
-from diagnostics import model_file_error, failure
 
 
-from diagnostics import install_error_hook
+from d1_example_errors import failure, install_error_hook, model_file_error
 
 if __name__ == "__main__":
     install_error_hook()

@@ -17,9 +17,8 @@ Use this example to verify that:
     - The tactile matrix frames are received and decoded.
 """
 
-from diagnostics import failure
 
-from diagnostics import install_error_hook, report_error, require_display
+from d1_example_errors import failure, install_error_hook, report_error, require_display
 
 if __name__ == "__main__":
     install_error_hook()

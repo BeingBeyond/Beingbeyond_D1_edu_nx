@@ -1,6 +1,10 @@
-from diagnostics import configuration_error
-
-from diagnostics import install_error_hook, report_error, require_display, warn_exo_readings
+from d1_example_errors import (
+    configuration_error,
+    install_error_hook,
+    report_error,
+    require_display,
+    warn_exo_readings,
+)
 
 if __name__ == "__main__":
     install_error_hook()

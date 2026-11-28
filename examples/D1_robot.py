@@ -1,11 +1,9 @@
-from diagnostics import configuration_error, failure
-
 import os
 import sys
 import threading
 import time
 import traceback
-from diagnostics import format_error, report_error
+from d1_example_errors import configuration_error, failure, format_error, report_error
 
 from beingbeyond_d1_edu_sdk import HeadArmRobot
 from beingbeyond_d1_edu_sdk.hand import DexHand

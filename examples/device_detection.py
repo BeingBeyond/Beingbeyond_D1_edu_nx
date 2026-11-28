@@ -5,7 +5,6 @@ move joints, calibrate, change IDs, or instantiate SDK controllers. USB IDs are
 candidate filters, not proof of a device's role. Serial numbers are not required.
 """
 
-from diagnostics import configuration_error, failure
 
 import argparse
 from contextlib import contextmanager
@@ -21,8 +20,21 @@ import struct
 import subprocess
 import time
 
-from diagnostics import DiagnosticError, DiagnosticGroup, as_diagnostic, format_error, joint_label, joint_read_error, install_error_hook, BilingualArgumentParser, report_error, LABELS
-from diagnostics import validate_exo_ids
+from d1_example_errors import (
+    BilingualArgumentParser,
+    DiagnosticError,
+    DiagnosticGroup,
+    LABELS,
+    as_diagnostic,
+    configuration_error,
+    failure,
+    format_error,
+    install_error_hook,
+    joint_label,
+    joint_read_error,
+    report_error,
+    validate_exo_ids,
+)
 
 if __name__ == "__main__":
     if "--debug" in sys.argv:

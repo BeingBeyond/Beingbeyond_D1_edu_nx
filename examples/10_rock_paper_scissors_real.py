@@ -13,21 +13,22 @@ serially in a worker. Each clearance sequence finishes before the latest gesture
 is applied; pending gestures do not accumulate. Press q to interrupt waits and exit.
 """
 
-from diagnostics import configuration_error, missing_joints_error, target_warning
 
-
-from diagnostics import install_error_hook, report_error, require_display
+from d1_example_errors import (
+    configuration_error,
+    install_error_hook,
+    report_error,
+    require_display,
+    target_warning,
+)
 
 if __name__ == "__main__":
     install_error_hook()
 
-import importlib
 import random
-import sys
 import threading
 import time
 from dataclasses import dataclass, replace
-from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 import cv2
@@ -42,37 +43,11 @@ from utils import deg_list_to_rad
 from device_detection import resolve_devices, device_operation
 
 
-EXAMPLES_DIR = Path(__file__).resolve().parent
-D1_EDU_DIR = EXAMPLES_DIR.parent
-DEX_RETARGETING_DIR = D1_EDU_DIR / "lib" / "dex-retargeting"
-DEX_VECTOR_EXAMPLE_DIR = DEX_RETARGETING_DIR / "example" / "vector_retargeting"
-
-sys.path.append(str(DEX_RETARGETING_DIR))
-sys.path.append(str(DEX_VECTOR_EXAMPLE_DIR))
-
-from dex_retargeting.constants import RobotName, RetargetingType, HandType, get_default_config_path
-from dex_retargeting.retargeting_config import RetargetingConfig
-from single_hand_detector import SingleHandDetector
-
-
-FINGER_ORDER = ("thumb", "index", "middle", "ring", "pinky")
-GESTURE_LABELS = {
-    "rock": "ROCK",
-    "paper": "PAPER",
-    "scissors": "SCISSORS",
-    "unknown": "UNKNOWN",
-}
-
-
-@dataclass(frozen=True)
-class StereoCfg:
-    device: str = "auto"
-    single_width: int = 640
-    single_height: int = 480
-    fps: int = 30
-    fourcc: str = "MJPG"
-    swap_lr: bool = False
-    view: str = "both"
+from rps_common import (
+    FINGER_ORDER, SingleHandDetector, StableGesture, StereoCfg, draw_overlay,
+    finger_bend_scores, infer_finger_indices, init_right_hand_retargeting,
+    retarget_joint_pos, winning_gesture,
+)
 
 
 @dataclass(frozen=True)
@@ -109,6 +84,7 @@ class RpsArmCfg:
 
 @dataclass(frozen=True)
 class RpsCfg:
+    show_scores: bool = False
     thumb_threshold: float = 0.45
     index_threshold: float = 0.45
     middle_threshold: float = 0.45
@@ -140,89 +116,6 @@ class IdleCfg:
     wait_timeout_s: float = 3.0
 
 
-@dataclass
-class StableGesture:
-    last_raw: str = "unknown"
-    last_stable: str = "unknown"
-    count: int = 0
-    unknown_count: int = 0
-
-    def update(self, raw: str, stable_frames: int, unknown_reset_frames: int) -> str:
-        if raw == self.last_raw:
-            self.count += 1
-        else:
-            self.last_raw = raw
-            self.count = 1
-
-        if raw == "unknown":
-            self.unknown_count += 1
-            if self.unknown_count >= unknown_reset_frames:
-                self.last_stable = "unknown"
-            return self.last_stable
-
-        self.unknown_count = 0
-        if self.count >= stable_frames:
-            self.last_stable = raw
-        return self.last_stable
-
-
-def init_right_hand_retargeting():
-    robot_name = RobotName.d1hand
-
-    dex_pkg = importlib.util.find_spec("dex_retargeting")
-    if dex_pkg and dex_pkg.origin:
-        robot_dir = Path(dex_pkg.origin).absolute().parent.parent / "assets" / "robots" / "hands"
-    else:
-        robot_dir = DEX_RETARGETING_DIR / "assets" / "robots" / "hands"
-    RetargetingConfig.set_default_urdf_dir(str(robot_dir))
-
-    config_path = get_default_config_path(robot_name, RetargetingType.dexpilot, HandType.right)
-    return RetargetingConfig.load_from_file(config_path).build()
-
-
-def retarget_joint_pos(retargeting, joint_pos: np.ndarray) -> np.ndarray:
-    retargeting_type = retargeting.optimizer.retargeting_type
-    indices = retargeting.optimizer.target_link_human_indices
-
-    if retargeting_type == "POSITION":
-        ref_value = joint_pos[indices, :]
-    else:
-        origin_indices = indices[0, :]
-        task_indices = indices[1, :]
-        ref_value = joint_pos[task_indices, :] - joint_pos[origin_indices, :]
-
-    return retargeting.retarget(ref_value)
-
-
-def infer_finger_indices(joint_names) -> Dict[str, Tuple[int, ...]]:
-    aliases = {
-        "thumb": ("thumb",),
-        "index": ("index",),
-        "middle": ("middle",),
-        "ring": ("ring",),
-        "pinky": ("pinky", "little"),
-    }
-    indices = {finger: [] for finger in FINGER_ORDER}
-    for i, name in enumerate(joint_names):
-        lname = name.lower()
-        for finger, keys in aliases.items():
-            if any(key in lname for key in keys):
-                indices[finger].append(i)
-
-    missing = [finger for finger, values in indices.items() if not values]
-    if missing:
-        raise missing_joints_error(missing)
-    return {finger: tuple(values) for finger, values in indices.items()}
-
-
-def finger_bend_scores(qpos: np.ndarray, finger_indices: Dict[str, Tuple[int, ...]]) -> Dict[str, float]:
-    scores = {}
-    for finger, indices in finger_indices.items():
-        values = np.abs(qpos[list(indices)])
-        scores[finger] = float(np.max(values))
-    return scores
-
-
 def classify_rps(scores: Dict[str, float], thresholds: Dict[str, float]) -> str:
     bent = {finger: scores[finger] >= thresholds[finger] for finger in FINGER_ORDER}
     non_thumb = ("index", "middle", "ring", "pinky")
@@ -230,12 +123,7 @@ def classify_rps(scores: Dict[str, float], thresholds: Dict[str, float]) -> str:
     index_open = scores["index"] < thresholds["index"] * 0.55
     middle_open = scores["middle"] < thresholds["middle"] * 0.55
 
-    if (
-        not bent["index"]
-        and not bent["middle"]
-        and not bent["ring"]
-        and not bent["pinky"]
-    ):
+    if bent_non_thumb_count == 0:
         return "paper"
 
     if (
@@ -257,9 +145,6 @@ def classify_rps(scores: Dict[str, float], thresholds: Dict[str, float]) -> str:
     if bent_non_thumb_count >= 3:
         return "rock"
 
-    if bent["index"] and bent["middle"] and (bent["ring"] or bent["pinky"]):
-        return "rock"
-
     if (
         index_open
         and middle_open
@@ -268,23 +153,7 @@ def classify_rps(scores: Dict[str, float], thresholds: Dict[str, float]) -> str:
     ):
         return "scissors"
 
-    if (
-        scores["index"] < thresholds["index"] * 0.35
-        and scores["middle"] < thresholds["middle"] * 0.35
-        and scores["ring"] < thresholds["ring"] * 0.45
-        and scores["pinky"] < thresholds["pinky"] * 0.45
-    ):
-        return "paper"
-
     return "unknown"
-
-
-def winning_gesture(human_gesture: str) -> Optional[str]:
-    return {
-        "rock": "paper",
-        "paper": "scissors",
-        "scissors": "rock",
-    }.get(human_gesture)
 
 
 def build_real_hand_gesture_sequences(cfg: HandCfg) -> Dict[str, Tuple[Tuple[np.ndarray, float], ...]]:
@@ -603,35 +472,6 @@ def move_head_arm_to_initial_pose(head_arm: HeadArmRobot, cfg: HeadArmCfg) -> No
     time.sleep(0.3)
 
 
-def draw_overlay(
-    image: np.ndarray,
-    fps: float,
-    human: str,
-    robot: Optional[str],
-    scores: Optional[Dict[str, float]],
-    thresholds: Dict[str, float],
-) -> np.ndarray:
-    out = image.copy()
-    lines = [
-        f"FPS: {fps:.1f}",
-        f"Human: {GESTURE_LABELS.get(human, human)}",
-        f"DexHand: {GESTURE_LABELS.get(robot, robot) if robot else '-'}",
-    ]
-    if scores is not None:
-        score_text = " ".join(
-            f"{finger[0]}:{scores[finger]:.2f}/{thresholds[finger]:.2f}"
-            for finger in FINGER_ORDER
-        )
-        lines.append(score_text)
-    lines.append("q: quit")
-
-    for i, line in enumerate(lines):
-        y = 28 + i * 26
-        cv2.putText(out, line, (12, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 3, cv2.LINE_AA)
-        cv2.putText(out, line, (12, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1, cv2.LINE_AA)
-    return out
-
-
 def main() -> None:
     require_display()
     stereo_cfg = StereoCfg()
@@ -687,7 +527,6 @@ def main() -> None:
         window_name = "D1 Rock-Paper-Scissors Real"
         last_time = time.time()
         fps = 0.0
-        frame_idx = 0
         stable = StableGesture()
         idle_motion = IdleMotion(
             idle_cfg,
@@ -695,8 +534,6 @@ def main() -> None:
             ready_hand_q_norm=(hand_cfg.open_value,) * 6,
             devices=devices,
         )
-        last_robot_gesture = None
-        last_scores = None
 
         motion_worker = RpsMotionWorker(
             head_arm, right_hand, robot_gestures, rps_head_arm_postures,
@@ -731,41 +568,27 @@ def main() -> None:
                 rgb = cv2.cvtColor(bgr_view, cv2.COLOR_BGR2RGB)
                 _, joint_pos, _, _ = detector.detect(rgb)
 
-                human_raw = "unknown"
-                human_stable = stable.last_stable
-                robot_gesture = last_robot_gesture
+                previous = stable.last_stable
+                raw = "unknown"
+                scores = None
+                if joint_pos is not None:
+                    qpos = retarget_joint_pos(retargeting, joint_pos)
+                    scores = finger_bend_scores(qpos, finger_indices)
+                    raw = classify_rps(scores, rps_cfg.thresholds)
 
-                if joint_pos is None:
-                    human_stable = stable.update("unknown", rps_cfg.stable_frames, rps_cfg.unknown_reset_frames)
-                    robot_gesture = None
-                    last_robot_gesture = None
-                    if frame_idx % 30 == 0:
-                        print("Right hand is not detected.")
-                else:
-                    human_qpos = retarget_joint_pos(retargeting, joint_pos)
-                    last_scores = finger_bend_scores(human_qpos, finger_indices)
-                    human_raw = classify_rps(last_scores, rps_cfg.thresholds)
-                    human_stable = stable.update(human_raw, rps_cfg.stable_frames, rps_cfg.unknown_reset_frames)
-                    robot_gesture = winning_gesture(human_stable)
-
-                    if human_stable == "unknown":
-                        last_robot_gesture = None
-
-                    if frame_idx % 30 == 0:
-                        print(
-                            f"raw={human_raw} stable={human_stable} "
-                            f"robot={robot_gesture} scores={last_scores}"
-                        )
-
+                human_stable = stable.update(raw, rps_cfg.stable_frames, rps_cfg.unknown_reset_frames)
+                robot_gesture = winning_gesture(human_stable) if joint_pos is not None else None
+                if human_stable != previous:
+                    print(f"Human: {human_stable} | D1: {robot_gesture or '-'}")
                 motion_worker.request(robot_gesture)
-                last_robot_gesture = robot_gesture
 
                 overlay = draw_overlay(
-                    camera.draw_info(bgr_view, fps),
+                    bgr_view,
+                    camera=camera,
                     fps=fps,
                     human=human_stable,
                     robot=robot_gesture,
-                    scores=last_scores,
+                    scores=scores if rps_cfg.show_scores else None,
                     thresholds=rps_cfg.thresholds,
                 )
                 with device_operation("display", "OpenCV", "visualization"):
@@ -774,7 +597,6 @@ def main() -> None:
                 if key == ord("q"):
                     break
 
-                frame_idx += 1
 
     except KeyboardInterrupt:
         pass

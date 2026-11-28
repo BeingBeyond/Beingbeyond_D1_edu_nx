@@ -7,10 +7,9 @@ This module defines StereoRGBCamera, which:
   - Builds a single RGB display view from both eyes or either eye
 """
 
-from diagnostics import configuration_error, failure
 
 import cv2
-from diagnostics import format_error
+from d1_example_errors import configuration_error, failure, format_error
 from device_detection import resolve_camera_device, device_operation
 
 

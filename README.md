@@ -268,6 +268,8 @@ Use `D1_DEBUG=1` or the diagnostic tool's `--debug` option for full error detail
   `--no-vision` 跳过相机识别和取帧；`--headless` 保留相机采集但不显示窗口。
   设备预检查通过不等于整机联动已验收，运行前仍需核对设备和运动范围。
 - 示例 0、4～10、`avp_teleop/`、`utils/` 为额外参考，不保证其全部设备、仿真与依赖可在 NX 使用。
+- 猜拳示例使用 dex-retargeting。其 URDF 解析器通过 anytree 构建连杆树，通过 trimesh 处理网格。
+  在单独的兼容环境中，运行 `pip install -e lib/dex-retargeting` 安装该库及其声明的依赖，另需 MediaPipe 0.10.10。
 - 附带 dex-retargeting 的安装描述为 Python `>=3.7,<3.11`，且未在 NX 验收；
   SDK 的四版本支持矩阵不自动涵盖该可选库。不要在已验收 venv 中直接安装全部选配依赖。
 - 采集参数为请求值，不是相机持续帧率、延迟或丢帧性能承诺。

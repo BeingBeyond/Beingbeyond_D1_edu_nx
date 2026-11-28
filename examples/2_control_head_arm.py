@@ -16,9 +16,8 @@ Use this example to:
   - Confirm basic motion without running complex trajectories.
 """
 
-from diagnostics import configuration_error
 
-from diagnostics import install_error_hook
+from d1_example_errors import configuration_error, install_error_hook
 
 if __name__ == "__main__":
     install_error_hook()
@@ -88,10 +87,7 @@ def main():
             q_deg = rad_list_to_deg(q_rad)
             dq_deg = rad_list_to_deg(dq_rad)
 
-            print(f"  Current q (deg): {q_deg}")
-            print(f"  Current dq (deg/s) approx: {dq_deg}")
-            print(f"  This joint q[{idx}] = {q_deg[idx]:.2f} deg, dq[{idx}] = {dq_deg[idx]:.2f} deg/s")
-
+            print(f"  Position {q_deg[idx]:.2f} deg, velocity {dq_deg[idx]:.2f} deg/s")
 
             base_deg = q_init_deg.copy()
             base_joint_deg = base_deg[idx]

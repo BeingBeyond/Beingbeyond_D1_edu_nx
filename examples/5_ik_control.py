@@ -13,10 +13,15 @@ Use this example to:
   - Inspect how small Cartesian offsets map to joint motion.
 """
 
-from diagnostics import configuration_error, target_warning, failure
 
 
-from diagnostics import install_error_hook, report_error
+from d1_example_errors import (
+    configuration_error,
+    failure,
+    install_error_hook,
+    report_error,
+    target_warning,
+)
 
 if __name__ == "__main__":
     install_error_hook()
@@ -81,7 +86,7 @@ def main():
         with device_operation('head_arm', dev, 'set_positions'):
             robot.set_positions(q_init_rad)
         with device_operation('head_arm', dev, 'wait_until_reached'):
-            robot.wait_until_reached(
+            reached_in = robot.wait_until_reached(
                 q_init_rad,
                 active_joint_indices=range(n_joints),
                 pos_tol_deg=wait_pos_tol_deg,
@@ -155,7 +160,7 @@ def main():
             )
             if not np.all(np.isfinite(q_head_sol)) or not np.all(np.isfinite(q_arm_sol)):
                 print("[IK] Invalid IK solution (NaN/Inf), stopping.")
-                break
+                return
 
             print(
                 f"[IK][{outer:02d}] step cost={cost:.6f}, "
@@ -173,7 +178,7 @@ def main():
             with device_operation('head_arm', dev, 'set_positions'):
                 robot.set_positions(q_cmd)
             with device_operation('head_arm', dev, 'wait_until_reached'):
-                robot.wait_until_reached(
+                reached_in = robot.wait_until_reached(
                     q_cmd,
                     active_joint_indices=range(n_joints),
                     pos_tol_deg=wait_pos_tol_deg,
@@ -195,21 +200,8 @@ def main():
         print("[Check] q_target (xyzw):", q_target_xyzw)
         print("[Check] q_final  (xyzw):", q_final_xyzw)
 
-        # 7) Ensure robot is at the final IK solution
-        print("\n[Exec] Sending final IK solution to robot ...")
-        q_final_cmd = np.concatenate([q_head_iter, q_arm_iter])
-        with device_operation('head_arm', dev, 'set_positions'):
-            robot.set_positions(q_final_cmd)
-        with device_operation('head_arm', dev, 'wait_until_reached'):
-            dt = robot.wait_until_reached(
-                q_final_cmd,
-                active_joint_indices=range(n_joints),
-                pos_tol_deg=wait_pos_tol_deg,
-                vel_tol_deg_s=wait_vel_tol_deg_s,
-                timeout_s=5.0,
-            )
-        if dt is not None:
-            print(f"[Exec] Reached final target in {dt:.2f} s.")
+        if reached_in is not None:
+            print(f"[Exec] Last joint target reached in {reached_in:.2f} s.")
         else:
             report_error(target_warning(), severity="warning")
 
@@ -218,7 +210,6 @@ def main():
     except KeyboardInterrupt:
         print("\nInterrupted by user (Ctrl+C).")
     finally:
-
         with device_operation('head_arm', dev, 'home_and_close'):
             robot.home_and_close()
 
